@@ -78,7 +78,39 @@ class Service:
         raise Denied(404, 'not implemented')
 
     def resource(self, path, data, token):
-        raise Denied(404, 'not implemented')
+        if path == '/grant':
+            require(hmac.compare_digest(token, self.api_key), 401, 'invalid service identity')
+            user, role, action, rid, aud = (data[k] for k in ('user', 'role', 'action', 'id', 'audience'))
+            require(user in ROLES and role in ('user', 'admin'))
+            require(action in ('read', 'create', 'stats') and aud in ('api', 'processor'))
+            require(aud != 'processor' or action == 'read')
+            if action == 'read':
+                require(type(rid) is int and rid in self.notes, 404, 'note not found')
+                require(VULN == 'idor' or self.notes[rid]['owner'] == user)
+            if action == 'stats':
+                require(role == 'admin')
+            cap = secrets.token_urlsafe(32)
+            self.caps[cap] = {'user': user, 'action': action, 'id': rid,
+                              'audience': aud, 'expires': time.time() + 30}
+            return {'capability': cap}
+        require(path in ('/read', '/create', '/stats'), 404, 'not found')
+        require(token in self.caps, 401, 'invalid capability')
+        cap = self.caps[token]
+        require(cap['expires'] > time.time(), 401, 'expired capability')
+        require(cap['action'] == path[1:] and cap['audience'] == data.get('audience'))
+        if path == '/read':
+            rid = data['id']
+            require(type(rid) is int and rid in self.notes, 404, 'note not found')
+            require((VULN == 'deputy' and cap['audience'] == 'processor') or rid == cap['id'])
+            return self.notes[rid]
+        if path == '/stats':
+            return {'count': len(self.notes)}
+        text = data['text']
+        require(isinstance(text, str) and (VULN == 'validation' or 0 < len(text) <= 2000),
+                400, 'invalid text')
+        rid = max(self.notes, default=0) + 1
+        self.notes[rid] = {'id': rid, 'owner': cap['user'], 'text': text}
+        return self.notes[rid]
 
 
 def serve(role, port, resource_port, processor_port):
