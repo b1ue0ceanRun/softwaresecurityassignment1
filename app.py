@@ -72,7 +72,10 @@ class Service:
         if self.role == 'resource':
             return self.resource(path, data, token)
         require(path == '/job', 404, 'not found')
-        raise Denied(404, 'not implemented')
+        # The processor has no API service secret and receives only one job capability.
+        note = self.call_resource('/read', {'id': data['id'], 'audience': 'processor'}, token)
+        from note_exporter import export_note
+        return {'export': export_note(note)}
 
     def api(self, path, data, token):
         raise Denied(404, 'not implemented')
