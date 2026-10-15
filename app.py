@@ -78,7 +78,37 @@ class Service:
         return {'export': export_note(note)}
 
     def api(self, path, data, token):
-        raise Denied(404, 'not implemented')
+        if path == '/login':
+            name, password = data['username'], data['password']
+            if VULN == 'sql':
+                # Deliberately unsafe classroom fixture; fixed path is parameterized.
+                row = self.db.execute("SELECT name,salt,digest FROM users WHERE name='" + name + "'").fetchone()  # nosec B608
+            else:
+                row = self.db.execute('SELECT name,salt,digest FROM users WHERE name=?', (name,)).fetchone()
+            require(row is not None, 401, 'invalid credentials')
+            name, salt, expected = row
+            actual = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 200000)
+            require(hmac.compare_digest(actual, expected), 401, 'invalid credentials')
+            role = ROLES[name]
+            session = secrets.token_urlsafe(32)
+            self.sessions[session] = (name, role, time.time() + 900)
+            return {'token': session}
+        require(token in self.sessions, 401, 'invalid session')
+        name, role, expiry = self.sessions[token]
+        require(expiry > time.time(), 401, 'expired session')
+        require(path in ('/create', '/read', '/export', '/stats'), 404, 'not found')
+        if path == '/stats':
+            require(role == 'admin')
+        action = {'/create': 'create', '/read': 'read', '/export': 'read', '/stats': 'stats'}[path]
+        rid = data.get('id') if path in ('/read', '/export') else None
+        audience = 'processor' if path == '/export' else 'api'
+        grant = self.call_resource('/grant', {'user': name, 'role': role, 'action': action,
+                  'id': rid, 'audience': audience}, self.api_key)
+        cap = grant['capability']
+        if path == '/export':
+            # Client-selected source is untrusted; resource must enforce job binding.
+            return forward(self.processor_port, '/job', {'id': data.get('source_id', rid)}, cap)
+        return self.call_resource(path, {**data, 'audience': 'api'}, cap)
 
     def resource(self, path, data, token):
         if path == '/grant':
