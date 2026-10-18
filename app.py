@@ -29,18 +29,18 @@ def require(condition, status=403, message='forbidden'):
         raise Denied(status, message)
 
 
-def request(port, path, data, token=''):
+def request(port, path, data, token=None):
     req = Request(f'http://{HOST}:{port}{path}',
                   json.dumps(data).encode(),
-                  {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token})
+                  {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (token or '')})
     try:
-        with urlopen(req, timeout=5) as response:  # nosec B310: fixed loopback HTTP
+        with urlopen(req, timeout=5) as response:  # nosec B310
             return response.status, json.load(response)
     except HTTPError as error:
         return error.code, json.load(error)
 
 
-def forward(port, path, data, token=''):
+def forward(port, path, data, token=None):
     status, value = request(port, path, data, token)
     if status != 200:
         raise Denied(status, value.get('error', 'downstream error'))
@@ -59,7 +59,7 @@ class Service:
         self.db.executemany('INSERT INTO users VALUES (?, ?, ?)',
                             [(name, *values) for name, values in USERS.items()])
         self.notes = {1: {'id': 1, 'owner': 'alice', 'text': 'Alice private note'},
-                      2: {'id': 2, 'owner': 'bob', 'text': 'Bob private note'}}
+                      2: {'id': 2, 'owner': 'bob', 'text': 'Bob private note FLAG{bob_note_is_private}'}}
 
     def call_resource(self, path, data, token):
         return forward(self.resource_port, path, data, token)
@@ -75,14 +75,19 @@ class Service:
         # The processor has no API service secret and receives only one job capability.
         note = self.call_resource('/read', {'id': data['id'], 'audience': 'processor'}, token)
         from note_exporter import export_note
-        return {'export': export_note(note)}
+        result = {'export': export_note(note)}
+        if VULN == 'deputy' and note['owner'] == 'bob':
+            result['flag'] = 'FLAG{job_scope_must_follow_resource}'
+        return result
 
     def api(self, path, data, token):
         if path == '/login':
             name, password = data['username'], data['password']
+            submitted_name = name
             if VULN == 'sql':
-                # Deliberately unsafe classroom fixture; fixed path is parameterized.
-                row = self.db.execute("SELECT name,salt,digest FROM users WHERE name='" + name + "'").fetchone()  # nosec B608
+                # B608 is accepted only here: the explicit SQL injection fixture.
+                query = "SELECT name,salt,digest FROM users WHERE name='" + name + "'"  # nosec B608
+                row = self.db.execute(query).fetchone()
             else:
                 row = self.db.execute('SELECT name,salt,digest FROM users WHERE name=?', (name,)).fetchone()
             require(row is not None, 401, 'invalid credentials')
@@ -92,7 +97,10 @@ class Service:
             role = ROLES[name]
             session = secrets.token_urlsafe(32)
             self.sessions[session] = (name, role, time.time() + 900)
-            return {'token': session}
+            result = {'token': session}
+            if VULN == 'sql' and submitted_name != name:
+                result['flag'] = 'FLAG{sql_changes_identity_lookup}'
+            return result
         require(token in self.sessions, 401, 'invalid session')
         name, role, expiry = self.sessions[token]
         require(expiry > time.time(), 401, 'expired session')
@@ -143,7 +151,10 @@ class Service:
                 400, 'invalid text')
         rid = max(self.notes, default=0) + 1
         self.notes[rid] = {'id': rid, 'owner': cap['user'], 'text': text}
-        return self.notes[rid]
+        result = dict(self.notes[rid])
+        if VULN == 'validation' and len(text) > 2000:
+            result['flag'] = 'FLAG{validate_before_storing}'
+        return result
 
 
 def serve(role, port, resource_port, processor_port):
