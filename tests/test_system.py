@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import socket
@@ -124,10 +125,11 @@ class IntegrationTests(unittest.TestCase):
                         if enabled:
                             self.assertIn('Bob private note', body['export'])
                     self.assertEqual(status, expected)
-                    flag_obtained = 'FLAG{' in json.dumps(body)
+                    flags = re.findall(r'FLAG\{[^}]+\}', json.dumps(body))
+                    flag_obtained = bool(flags)
                     self.assertEqual(flag_obtained, enabled)
                     evidence.append({'vulnerability': mode, 'fixture_enabled': enabled,
-                                     'status': status, 'expected': expected, 'flag_obtained': flag_obtained,
+                                     'status': status, 'expected': expected, 'flag_obtained': flag_obtained, 'flags': flags,
                                      'passed': status == expected and flag_obtained == enabled})
         Path('evidence').mkdir(exist_ok=True)
         Path('evidence/vulnerabilities.json').write_text(json.dumps(evidence, indent=2) + '\n')
