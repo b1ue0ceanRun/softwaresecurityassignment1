@@ -117,7 +117,7 @@ metadata, Bandit, audit or test failure and archives results even on failure.
 
 - PLAN.md: initial four-phase plan; Git preserves its pre-implementation commit.
 - DESIGN.md: requirements, architecture, data flow, access matrix and STRIDE.
-- REPORT.md: English report (approximately 2,269 words).
+- REPORT.md: concise Chinese draft with actual local execution results.
 - AI_USE.md: transparent declaration; review before submission.
 - evidence/: saved test and analysis results.
 - Jenkinsfile, source, helper, tests and complete `.git` history.
