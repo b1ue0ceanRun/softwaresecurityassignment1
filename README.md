@@ -122,4 +122,15 @@ metadata, Bandit, audit or test failure and archives results even on failure.
 - evidence/: saved test and analysis results.
 - Jenkinsfile, source, helper, tests and complete `.git` history.
 
+## Run the PoCs
+
+Each PoC starts a fresh vulnerable three-process cluster and prints its response:
+
+```sh
+python scripts/poc_validation.py
+python scripts/poc_sql.py
+python scripts/poc_idor.py
+python scripts/poc_confused_deputy.py
+```
+
 For learning, follow GUIDE_ZH.md one step at a time. No remote push was performed.
